@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "castenv"
-version = "0.0.1"
+version = "0.1.0"
 description = "Smart environment loader with robust casting/normalization. Layers: decouple → dotenv → os.environ."
 keywords = ["env", "dotenv", "decouple", "config", "settings", "casting", "normalization"]
 authors = ["Ryan Julyan <ryan@julyan.biz>"]
@@ -51,7 +51,7 @@ decouple = ["python-decouple"]
 "Repository" = "https://github.com/systemizing-solutions/castenv"
 
 [tool.bumpver]
-current_version = "0.0.1"
+current_version = "0.1.0"
 version_pattern = "MAJOR.MINOR.PATCH"
 commit_message = "bump version {old_version} -> {new_version}"
 tag_message = "{new_version}"
