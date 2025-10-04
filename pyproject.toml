@@ -31,7 +31,7 @@ python = "^3.9"
 python-dotenv = { version = ">=1.1.1", optional = true }
 python-decouple = { version = ">=3.8", optional = true }
 
-[tool.poetry.dev-dependencies]
+[poetry.group.dev.dependencies]
 black = "^24.10.0"
 bumpver = "^2025.1131"
 coverage = "^7.6.4"
