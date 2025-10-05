@@ -55,17 +55,285 @@ print("SCALE (float) [0-1]:", SCALE)
 print("TAX (float):", TAX)
 ```
 
-## Normalization highlights
-- `None` via missing/empty/`null`/`none`
-- Booleans (`true/false/on/off/yes/no/1/0`)
-- Numbers (int/float/sci + `0x/0b/0o`)
-- Durations (`1h30m`, `500ms`) → seconds (float)
-- Sizes (`256MB`, `1GiB`, `512k`) → bytes (int)
-- JSON (`{"a":1}` / `["x","y"]`)
-- Lists (`a,b,c`) with recursive normalization
-- Percentages (`50%`) as string/number/fraction (configurable)
-- Env interpolation (`URL=${BASE:-http://localhost}/v1`)
-- `~` expansion
+## API Reference
+
+### Main Functions
+
+#### `get_env(key, default=None, *, normalize_kwargs=None)`
+Retrieves and normalizes an environment variable with automatic type casting.
+
+**Parameters:**
+- `key` (str): Environment variable name
+- `default` (Any): Default value if key not found (default: None)
+- `normalize_kwargs` (dict, optional): Additional normalization options (see below)
+
+**Returns:** Normalized value based on content and settings
+
+#### `env_bool(key, default=None, **kwargs)`
+Retrieves environment variable as boolean.
+
+**Boolean values recognized:**
+- `True`: `"true"`, `"yes"`, `"y"`, `"on"`, `"1"`
+- `False`: `"false"`, `"no"`, `"n"`, `"off"`, `"0"`
+
+#### `env_int(key, default=None, **kwargs)`
+Retrieves environment variable as integer.
+
+#### `env_float(key, default=None, **kwargs)`
+Retrieves environment variable as float.
+
+#### `env_str(key, default=None, **kwargs)`
+Retrieves environment variable as string.
+
+#### `env_list(key, default=None, *, separators=(",",), **kwargs)`
+Retrieves environment variable as list with custom separators.
+
+**Parameters:**
+- `separators`: Tuple of separator strings (default: `(",",)`)
+
+#### `get_all(keys, defaults=None, *, normalize_kwargs=None)`
+Retrieves multiple environment variables at once.
+
+**Parameters:**
+- `keys`: Iterable of key names
+- `defaults`: Dict of default values per key
+- `normalize_kwargs`: Normalization options for all keys
+
+## Normalization & Casting
+
+### Automatic Type Detection
+castenv automatically detects and converts values based on their content:
+
+#### 1. **None/Null Values**
+Converts to Python `None`:
+- Empty string: `""`
+- Null literals: `"null"`, `"none"`, `"nil"`, `"undefined"`
+
+```python
+env.get_env("MISSING", "")  # -> None (if coerce_empty_to_none=True)
+env.get_env("NULL_VAL", "null")  # -> None
+```
+
+#### 2. **Boolean Conversion**
+Automatically detects boolean strings (case-insensitive):
+
+**True values:** `"true"`, `"yes"`, `"y"`, `"on"`, `"1"`  
+**False values:** `"false"`, `"no"`, `"n"`, `"off"`, `"0"`
+
+```python
+env.get_env("DEBUG", "true")   # -> True
+env.env_bool("ENABLED", "no")  # -> False
+```
+
+#### 3. **Number Parsing**
+
+**Integers:**
+- Decimal: `"42"` → `42`
+- Hexadecimal: `"0xFF"` → `255`
+- Binary: `"0b1010"` → `10`
+- Octal: `"0o10"` → `8`
+
+**Floats:**
+- Standard: `"3.14"` → `3.14`
+- Scientific notation: `"1e-3"` → `0.001`
+
+```python
+env.get_env("HEX_COLOR", "0xFF00FF")  # -> 16711935
+env.get_env("RATIO", "1.5e-2")        # -> 0.015
+```
+
+#### 4. **Duration Parsing**
+Converts human-readable durations to seconds (float):
+
+**Supported units:**
+- `ns` - nanoseconds
+- `us`, `µs` - microseconds  
+- `ms` - milliseconds
+- `s` - seconds
+- `m` - minutes
+- `h` - hours
+- `d` - days
+- `w` - weeks
+
+**Examples:**
+```python
+env.get_env("TIMEOUT", "1m30s")     # -> 90.0
+env.get_env("CACHE_TTL", "2d1h")    # -> 176400.0
+env.get_env("DELAY", "500ms")       # -> 0.5
+env.get_env("WEEK", "1w")           # -> 604800.0
+```
+
+#### 5. **Byte Size Parsing**
+Converts size strings to bytes (int):
+
+**IEC Units (powers of 1024):**
+- `b`, `B` - bytes
+- `k`, `kb`, `kib`, `KiB` - kibibytes
+- `m`, `mb`, `mib`, `MiB` - mebibytes
+- `g`, `gb`, `gib`, `GiB` - gibibytes
+- `t`, `tb`, `tib`, `TiB` - tebibytes
+
+**SI Units (powers of 1000, uppercase trigger):**
+- `KB` - kilobytes (1000)
+- `MB` - megabytes (1000²)
+- `GB` - gigabytes (1000³)
+- `TB` - terabytes (1000⁴)
+
+```python
+env.get_env("CACHE", "256MB")       # -> 256000000 (SI: 256 * 1000²)
+env.get_env("BUFFER", "1MiB")       # -> 1048576 (IEC: 1024²)
+env.get_env("DISK", "500gb")        # -> 536870912000 (IEC by default)
+```
+
+#### 6. **Percentage Conversion**
+Handles percentage values with configurable output:
+
+**Modes (via `percent_mode`):**
+- `"none"` - Returns as string (default): `"50%"` → `"50%"`
+- `"number"` - Returns numeric value: `"50%"` → `50.0`
+- `"fraction"` - Returns decimal fraction: `"50%"` → `0.5`
+
+```python
+env.get_env("TAX", "15%", normalize_kwargs={"percent_mode": "number"})     # -> 15.0
+env.get_env("SCALE", "50%", normalize_kwargs={"percent_mode": "fraction"}) # -> 0.5
+env.get_env("RAW", "25%")  # -> "25%" (default)
+```
+
+#### 7. **JSON Parsing**
+Automatically parses JSON objects and arrays:
+
+```python
+env.get_env("CONFIG", '{"key": "value", "count": 10}')  # -> {'key': 'value', 'count': 10}
+env.get_env("ITEMS", '["a", "b", "c"]')                 # -> ['a', 'b', 'c']
+env.get_env("QUOTED", '"{\\"k\\": \\"v\\"}"')           # -> {'k': 'v'}
+```
+
+#### 8. **List Parsing**
+Splits comma-separated values (or custom separators) into lists:
+
+**Default separator:** `,`
+
+```python
+env.get_env("HOSTS", "localhost,127.0.0.1", normalize_kwargs={"parse_lists": True})
+# -> ['localhost', '127.0.0.1']
+
+env.env_list("PORTS", "8000;8001;8002", separators=(";",))
+# -> ['8000', '8001', '8002']
+
+# Recursive normalization on list items
+env.get_env("MIXED", "true,42,3.14", normalize_kwargs={"parse_lists": True})
+# -> [True, 42, 3.14]
+```
+
+#### 9. **Environment Variable Interpolation**
+Expands `${VAR}` and `$VAR` references:
+
+```python
+# With BASE_URL="https://api.example.com"
+env.get_env("API_URL", "${BASE_URL}/v1")        # -> "https://api.example.com/v1"
+env.get_env("FULL_URL", "${BASE:-http://localhost}/api")  # -> Uses default if BASE not set
+env.get_env("PATH", "$HOME/config")             # -> Expands $HOME
+```
+
+#### 10. **Path Expansion**
+Expands `~` to user's home directory:
+
+```python
+env.get_env("LOG_FILE", "~/app/logs/app.log")  # -> "/home/user/app/logs/app.log"
+```
+
+#### 11. **Quote Handling**
+Strips matching quotes and unescapes common sequences:
+
+**Escape sequences supported:**
+- `\\` → `\`
+- `\"` → `"`
+- `\'` → `'`
+- `\n` → newline
+- `\r` → carriage return
+- `\t` → tab
+- `\b` → backspace
+- `\f` → form feed
+- `\0` → null byte
+
+```python
+env.get_env("MSG", '"Hello\\nWorld"')  # -> "Hello\nWorld" (with actual newline)
+env.get_env("PATH", "'C:\\\\Users\\\\App'")  # -> "C:\Users\App"
+```
+
+## Normalization Parameters
+
+The `normalize_kwargs` dictionary accepts the following parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `coerce_empty_to_none` | bool | `True` | Convert empty strings to `None` |
+| `coerce_null_strings` | bool | `True` | Convert "null"/"none" to `None` |
+| `parse_booleans` | bool | `True` | Parse boolean strings |
+| `parse_numbers` | bool | `True` | Parse numeric strings |
+| `parse_json` | bool | `True` | Parse JSON objects/arrays |
+| `parse_lists` | bool | `True` | Parse comma-separated lists |
+| `list_separators` | tuple | `(",",)` | Separators for list parsing |
+| `strip_quotes` | bool | `True` | Remove matching quotes |
+| `unescape_in_quotes` | bool | `True` | Unescape sequences in quotes |
+| `interpolate_env` | bool | `True` | Expand ${VAR} references |
+| `expand_user` | bool | `True` | Expand ~ to home directory |
+| `parse_duration` | bool | `True` | Parse duration strings |
+| `parse_bytesize` | bool | `True` | Parse byte size strings |
+| `percent_mode` | str | `"none"` | Percentage mode: `"none"`, `"number"`, or `"fraction"` |
+| `lowercase_strings` | bool | `False` | Convert final strings to lowercase |
+| `enum` | iterable | `None` | Validate value is in allowed set |
+
+### Examples with Custom Parameters
+
+```python
+# Disable list parsing
+env.get_env("CSV", "a,b,c", normalize_kwargs={"parse_lists": False})  # -> "a,b,c"
+
+# Custom list separator
+env.get_env("ITEMS", "x|y|z", normalize_kwargs={"parse_lists": True, "list_separators": ("|",)})  # -> ['x', 'y', 'z']
+
+# Enum validation
+env.get_env("ENV", "dev", normalize_kwargs={"enum": ["dev", "staging", "prod"]})  # -> "dev"
+# Raises ValueError if value not in enum
+
+# Lowercase strings
+env.get_env("NAME", "MyApp", normalize_kwargs={"lowercase_strings": True})  # -> "myapp"
+
+# Disable specific parsers
+env.get_env("RAW", "true", normalize_kwargs={"parse_booleans": False})  # -> "true" (string)
+```
+
+## Configuration
+
+### Global Configuration
+
+Configure castenv once at startup:
+
+```python
+from pathlib import Path
+import castenv as env
+
+env.configure(
+    search_dirs=[Path("/app/config")],     # Where to look for .env files
+    env_name="production",                  # Use .env.production files
+    filenames=[".env", ".env.local"],       # Custom file names
+    stop_at_first_found_dir=True,          # Stop at first dir with .env
+    prefer_os_over_dotenv=True,            # OS env vars take precedence
+    use_decouple_if_available=True         # Use python-decouple if installed
+)
+```
+
+### Temporary Configuration (Testing)
+
+Use context manager for temporary overrides:
+
+```python
+with env.using(search_dirs=[Path("tests/fixtures")], env_name="test"):
+    # Temporary configuration active here
+    value = env.get_env("TEST_VAR")
+# Original configuration restored
+```
 
 ## Testing overrides
 ```python
