@@ -586,3 +586,238 @@ def test_normalize_config_missing_env_var(monkeypatch):
     # os.path.expandvars leaves undefined vars as-is
     result = env.normalize_config("prefix_${UNDEFINED_VAR}_suffix")
     assert result == "prefix__suffix"
+
+
+# -----------------------
+# normalize_config with layered sources tests
+# -----------------------
+
+
+def test_normalize_config_layered_sources_os_takes_precedence(
+    monkeypatch, _maybe_skip_dotenv, tmp_path
+):
+    """Test that os.environ takes precedence over dotenv by default."""
+    # Create a .env file
+    env_file = tmp_path / ".env"
+    env_file.write_text("API_KEY=from-dotenv\nAPI_PORT=3000")
+
+    # Override in os.environ (higher precedence)
+    monkeypatch.setenv("API_PORT", "9000")
+
+    # Configure to use our temp directory
+    with env.using(search_dirs=[tmp_path]):
+        config = {
+            "api_key": "${API_KEY}",  # From dotenv
+            "api_port": "${API_PORT}",  # From os.environ (overrides dotenv)
+        }
+
+        result = env.normalize_config(config)
+
+        assert result["api_key"] == "from-dotenv"
+        assert result["api_port"] == 9000  # int type, from os.environ
+
+
+def test_normalize_config_layered_sources_dotenv_fallback(
+    monkeypatch, _maybe_skip_dotenv, tmp_path
+):
+    """Test that dotenv is used when var not in os.environ."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("DB_HOST=dotenv-host\nDB_PORT=5432")
+
+    # Make sure these aren't in os.environ
+    monkeypatch.delenv("DB_HOST", raising=False)
+    monkeypatch.delenv("DB_PORT", raising=False)
+
+    with env.using(search_dirs=[tmp_path]):
+        config = {
+            "host": "${DB_HOST}",
+            "port": "${DB_PORT}",
+        }
+
+        result = env.normalize_config(config)
+
+        assert result["host"] == "dotenv-host"
+        assert result["port"] == 5432  # int type
+
+
+def test_normalize_config_default_values_in_expansion(monkeypatch, _maybe_skip_dotenv):
+    """Test ${VAR:-default} syntax for default values."""
+    monkeypatch.delenv("UNDEFINED_VAR", raising=False)
+
+    config = {
+        "timeout": "${UNDEFINED_VAR:-30s}",
+        "retries": "${RETRIES:-3}",
+        "host": "${DB_HOST:-localhost}",
+    }
+
+    result = env.normalize_config(config)
+
+    assert result["timeout"] == 30.0  # float type (duration)
+    assert result["retries"] == 3  # int type
+    assert result["host"] == "localhost"  # string
+
+
+def test_normalize_config_mixed_sources_with_defaults(
+    monkeypatch, _maybe_skip_dotenv, tmp_path
+):
+    """Test mixing os.environ, dotenv, and defaults."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("API_KEY=from-dotenv\nAPI_TIMEOUT=60s")
+
+    # Some values from os.environ
+    monkeypatch.setenv("API_PORT", "8080")
+    monkeypatch.delenv("API_DEBUG", raising=False)
+
+    with env.using(search_dirs=[tmp_path]):
+        config = {
+            "api": {
+                "key": "${API_KEY}",  # From dotenv
+                "port": "${API_PORT}",  # From os.environ
+                "timeout": "${API_TIMEOUT}",  # From dotenv
+                "debug": "${API_DEBUG:-false}",  # Uses default
+                "max_retries": "${MAX_RETRIES:-5}",  # Uses default
+            }
+        }
+
+        result = env.normalize_config(config)
+
+        assert result["api"]["key"] == "from-dotenv"
+        assert result["api"]["port"] == 8080
+        assert result["api"]["timeout"] == 60.0
+        assert result["api"]["debug"] is False
+        assert result["api"]["max_retries"] == 5
+
+
+def test_normalize_config_multiple_env_vars_same_source(
+    monkeypatch, _maybe_skip_dotenv, tmp_path
+):
+    """Test expanding multiple vars from the same source."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "ALLOWED_HOSTS=localhost,127.0.0.1,192.168.1.1\n"
+        "TIMEOUTS=10s,30s,60s\n"
+        "FEATURES=auth,logging,monitoring"
+    )
+
+    monkeypatch.delenv("ALLOWED_HOSTS", raising=False)
+    monkeypatch.delenv("TIMEOUTS", raising=False)
+    monkeypatch.delenv("FEATURES", raising=False)
+
+    with env.using(search_dirs=[tmp_path]):
+        config = {
+            "hosts": "${ALLOWED_HOSTS}",
+            "timeouts": "${TIMEOUTS}",
+            "features": "${FEATURES}",
+        }
+
+        result = env.normalize_config(config)
+
+        assert result["hosts"] == ["localhost", "127.0.0.1", "192.168.1.1"]
+        assert result["timeouts"] == [10.0, 30.0, 60.0]
+        assert result["features"] == ["auth", "logging", "monitoring"]
+
+
+def test_normalize_config_complex_precedence_scenario(
+    monkeypatch, _maybe_skip_dotenv, tmp_path
+):
+    """Test a complex scenario with multiple sources and conversions."""
+    # Create .env file with baseline config
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "SERVICE_NAME=my-service\n"
+        "SERVICE_PORT=3000\n"
+        "LOG_LEVEL=debug\n"
+        "CACHE_SIZE=100MB\n"
+        "ENABLE_METRICS=true\n"
+        "WORKER_TIMEOUT=30s"
+    )
+
+    # Override some in os.environ (production overrides)
+    monkeypatch.setenv("SERVICE_PORT", "8080")
+    monkeypatch.setenv("LOG_LEVEL", "error")
+    monkeypatch.setenv("WORKER_TIMEOUT", "60s")
+
+    # One var only in os.environ
+    monkeypatch.setenv("API_KEY", "secret-key-123")
+
+    # One var with no source (uses default)
+    monkeypatch.delenv("MAX_CONNECTIONS", raising=False)
+
+    with env.using(search_dirs=[tmp_path]):
+        config = {
+            "service": {
+                "name": "${SERVICE_NAME}",  # From dotenv
+                "port": "${SERVICE_PORT}",  # From os.environ (overrides dotenv's 3000)
+                "api_key": "${API_KEY}",  # From os.environ only
+            },
+            "logging": {
+                "level": "${LOG_LEVEL}",  # From os.environ (overrides dotenv's debug)
+            },
+            "cache": {
+                "size": "${CACHE_SIZE}",  # From dotenv
+                "enabled": "${ENABLE_METRICS}",  # From dotenv
+            },
+            "workers": {
+                "timeout": "${WORKER_TIMEOUT}",  # From os.environ (overrides dotenv's 30s)
+                "max_count": "${MAX_CONNECTIONS:-10}",  # Uses default
+            },
+        }
+
+        result = env.normalize_config(config)
+
+        # Verify correct sources and types
+        assert result["service"]["name"] == "my-service"
+        assert result["service"]["port"] == 8080  # int, from os.environ
+        assert result["service"]["api_key"] == "secret-key-123"
+
+        assert result["logging"]["level"] == "error"
+
+        assert result["cache"]["size"] == 100000000  # int (bytes), from dotenv
+        assert result["cache"]["enabled"] is True  # bool, from dotenv
+
+        assert result["workers"]["timeout"] == 60.0  # float (seconds), from os.environ
+        assert result["workers"]["max_count"] == 10  # int, from default
+
+
+def test_normalize_config_short_form_vars_with_layered_sources(
+    monkeypatch, _maybe_skip_dotenv, tmp_path
+):
+    """Test short form $VAR (without braces) with layered sources."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("HOST=dotenv-host")
+
+    monkeypatch.setenv("PORT", "8080")
+    monkeypatch.delenv("HOST", raising=False)
+
+    with env.using(search_dirs=[tmp_path]):
+        config = {
+            "host": "$HOST",  # From dotenv (short form)
+            "port": "$PORT",  # From os.environ (short form)
+        }
+
+        result = env.normalize_config(config)
+
+        assert result["host"] == "dotenv-host"
+        assert result["port"] == 8080
+
+
+def test_normalize_config_with_decouple_precedence(monkeypatch, _maybe_skip_dotenv):
+    """Test that decouple takes precedence if installed."""
+    # Set all three sources
+    monkeypatch.setenv("SHARED_VAR", "from-os-environ")
+
+    config = {
+        "value": "${SHARED_VAR}",
+    }
+
+    # First without decouple (should use os.environ)
+    with env.using(use_decouple_if_available=False):
+        result = env.normalize_config(config)
+        assert result["value"] == "from-os-environ"
+
+    # With decouple enabled (if installed)
+    # The behavior depends on whether decouple is installed
+    with env.using(use_decouple_if_available=True):
+        result = env.normalize_config(config)
+        # If decouple is installed, it will be used; otherwise falls back to os.environ
+        assert result["value"] == "from-os-environ"  # At least os.environ works

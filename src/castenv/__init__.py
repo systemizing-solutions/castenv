@@ -348,7 +348,8 @@ def normalize_config(
     Recursively normalize and cast environment variables in config structures.
 
     Processes dictionaries, lists, and strings by:
-    1. Expanding ${VAR} and $VAR references with os.path.expandvars()
+    1. Expanding ${VAR} and $VAR references using castenv's layered sources
+       (decouple → dotenv → os.environ)
     2. Normalizing/casting the result (booleans, numbers, JSON, durations, sizes, etc.)
 
     Args:
@@ -407,8 +408,8 @@ def normalize_config(
     elif isinstance(obj, list):
         return [normalize_config(item, **normalize_kwargs) for item in obj]
     elif isinstance(obj, str):
-        # First expand environment variables
-        expanded = os.path.expandvars(obj)
+        # First expand environment variables using layered sources
+        expanded = _expand_env_from_sources(obj)
         # Then normalize/cast the result
         return normalize(expanded, **normalize_kwargs)
     else:
@@ -664,6 +665,46 @@ def get_all(
     for k in keys:
         out[k] = get_env(k, dflt.get(k), normalize_kwargs=normalize_kwargs)
     return out
+
+
+def _expand_env_from_sources(s: str) -> str:
+    """
+    Expand environment variables using castenv's layered sources.
+    Supports ${NAME:-default} and $NAME syntax.
+    Uses decouple → dotenv → os.environ precedence.
+    """
+    g = _ensure_global()
+
+    def repl(m: re.Match) -> str:
+        if m.group("name"):
+            name = m.group("name")
+            default = m.group("default")
+            # Try layered sources
+            raw = _SENTINEL
+            if g.use_decouple_if_available and _is_installed("decouple"):
+                raw = _raw_from_decouple(name, default=_SENTINEL)
+            if raw is _SENTINEL:
+                raw = _raw_from_dotenv_or_os(
+                    name, default if default is not None else _SENTINEL, g
+                )
+            if raw is _SENTINEL:
+                # No default was provided, return empty string
+                return ""
+            return (
+                str(raw)
+                if raw is not _SENTINEL
+                else (default if default is not None else "")
+            )
+        else:
+            short = m.group("short")
+            raw = _SENTINEL
+            if g.use_decouple_if_available and _is_installed("decouple"):
+                raw = _raw_from_decouple(short, default=_SENTINEL)
+            if raw is _SENTINEL:
+                raw = _raw_from_dotenv_or_os(short, _SENTINEL, g)
+            return str(raw) if raw is not _SENTINEL else ""
+
+    return _ENV_VAR_PATTERN.sub(repl, s)
 
 
 # =================

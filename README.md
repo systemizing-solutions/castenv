@@ -103,15 +103,21 @@ Retrieves multiple environment variables at once.
 Recursively normalizes config structures (dicts, lists, strings) with environment variable expansion and automatic type casting.
 
 This is useful for loading structured config from environment variables, where you want:
-1. Full support for `${VAR}` and `$VAR` environment variable references
-2. Automatic type casting of expanded strings (booleans, numbers, JSON, durations, etc.)
-3. Recursive processing of nested dicts and lists
+1. Full support for `${VAR}`, `${VAR:-default}`, and `$VAR` environment variable references
+2. **Layered source precedence** (decouple → dotenv → os.environ) for all variable lookups
+3. Automatic type casting of expanded strings (booleans, numbers, JSON, durations, etc.)
+4. Recursive processing of nested dicts and lists
 
 **Parameters:**
 - `obj` (Any): The object to process (dict, list, string, or other type)
 - `**kwargs`: All normalization options from `normalize()` (see Normalization Parameters below)
 
 **Returns:** The same structure with env vars expanded and types automatically cast
+
+**Key Differences from `os.path.expandvars()`:**
+- Respects castenv's configured dotenv search and precedence rules
+- Supports python-decouple if installed
+- Handles missing variables gracefully (returns empty string by default, or uses `${VAR:-default}` syntax for defaults)
 
 **Example:**
 ```python
@@ -130,6 +136,7 @@ config = {
         "host": "${DB_HOST}",
         "port": "${DB_PORT}",
         "debug": "${DB_DEBUG}",
+        "max_connections": "${MAX_CONNECTIONS:-100}",  # Uses default if not set
     },
     "hosts": "${ALLOWED_HOSTS}",
     "timeouts": "${TIMEOUTS}",
@@ -142,6 +149,7 @@ result = env.normalize_config(config)
 #         "host": "localhost",
 #         "port": 5432,              # int (not string)
 #         "debug": True,             # bool (not string)
+#         "max_connections": 100,    # int (from default)
 #     },
 #     "hosts": ["localhost", "127.0.0.1", "192.168.1.1"],  # list
 #     "timeouts": [30.0, 60.0, 120.0],  # list of floats (seconds)
