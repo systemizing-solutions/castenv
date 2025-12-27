@@ -21,6 +21,7 @@ __all__ = [
     "env_float",
     "env_list",
     "normalize",
+    "normalize_config",
     "DotenvSearchPlan",
     "__version__",
 ]
@@ -321,6 +322,95 @@ def normalize(
                 )
 
     return result
+
+
+def normalize_config(
+    obj: Any,
+    *,
+    coerce_empty_to_none: bool = True,
+    coerce_null_strings: bool = True,
+    parse_booleans: bool = True,
+    parse_numbers: bool = True,
+    parse_json: bool = True,
+    parse_lists: bool = True,
+    list_separators: Sequence[str] = (",",),
+    strip_quotes: bool = True,
+    unescape_in_quotes: bool = True,
+    interpolate_env: bool = True,
+    expand_user: bool = True,
+    parse_duration: bool = True,
+    parse_bytesize: bool = True,
+    percent_mode: str = "none",
+    lowercase_strings: bool = False,
+    enum: Iterable[str] | None = None,
+) -> Any:
+    """
+    Recursively normalize and cast environment variables in config structures.
+
+    Processes dictionaries, lists, and strings by:
+    1. Expanding ${VAR} and $VAR references with os.path.expandvars()
+    2. Normalizing/casting the result (booleans, numbers, JSON, durations, sizes, etc.)
+
+    Args:
+        obj: The object to process (dict, list, string, or any other type)
+        **kwargs: All normalization parameters (see normalize() for details)
+
+    Returns:
+        The same structure with environment variables expanded and types automatically cast
+
+    Raises:
+        ValueError: If enum validation fails on a string value
+
+    Example:
+        >>> import os
+        >>> os.environ['DB_USER'] = 'admin'
+        >>> os.environ['DB_PORTS'] = '5432,5433'
+        >>> os.environ['DEBUG'] = 'true'
+        >>> config = {
+        ...     "username": "${DB_USER}",
+        ...     "ports": "${DB_PORTS}",
+        ...     "debug": "${DEBUG}",
+        ...     "nested": {"timeout": "30s"}
+        ... }
+        >>> result = normalize_config(config)
+        # Returns: {
+        #     "username": "admin",
+        #     "ports": [5432, 5433],
+        #     "debug": True,
+        #     "nested": {"timeout": 30.0}
+        # }
+    """
+    normalize_kwargs = {
+        "coerce_empty_to_none": coerce_empty_to_none,
+        "coerce_null_strings": coerce_null_strings,
+        "parse_booleans": parse_booleans,
+        "parse_numbers": parse_numbers,
+        "parse_json": parse_json,
+        "parse_lists": parse_lists,
+        "list_separators": list_separators,
+        "strip_quotes": strip_quotes,
+        "unescape_in_quotes": unescape_in_quotes,
+        "interpolate_env": interpolate_env,
+        "expand_user": expand_user,
+        "parse_duration": parse_duration,
+        "parse_bytesize": parse_bytesize,
+        "percent_mode": percent_mode,
+        "lowercase_strings": lowercase_strings,
+        "enum": enum,
+    }
+
+    if isinstance(obj, dict):
+        return {key: normalize_config(value, **normalize_kwargs) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [normalize_config(item, **normalize_kwargs) for item in obj]
+    elif isinstance(obj, str):
+        # First expand environment variables
+        expanded = os.path.expandvars(obj)
+        # Then normalize/cast the result
+        return normalize(expanded, **normalize_kwargs)
+    else:
+        # Return other types as-is
+        return obj
 
 
 # =======================================

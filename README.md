@@ -99,6 +99,55 @@ Retrieves multiple environment variables at once.
 - `defaults`: Dict of default values per key
 - `normalize_kwargs`: Normalization options for all keys
 
+#### `normalize_config(obj, **normalize_kwargs)`
+Recursively normalizes config structures (dicts, lists, strings) with environment variable expansion and automatic type casting.
+
+This is useful for loading structured config from environment variables, where you want:
+1. Full support for `${VAR}` and `$VAR` environment variable references
+2. Automatic type casting of expanded strings (booleans, numbers, JSON, durations, etc.)
+3. Recursive processing of nested dicts and lists
+
+**Parameters:**
+- `obj` (Any): The object to process (dict, list, string, or other type)
+- `**kwargs`: All normalization options from `normalize()` (see Normalization Parameters below)
+
+**Returns:** The same structure with env vars expanded and types automatically cast
+
+**Example:**
+```python
+import os
+import castenv as env
+
+# Set environment variables
+os.environ['DB_HOST'] = 'localhost'
+os.environ['DB_PORT'] = '5432'
+os.environ['DB_DEBUG'] = 'true'
+os.environ['ALLOWED_HOSTS'] = 'localhost,127.0.0.1,192.168.1.1'
+os.environ['TIMEOUTS'] = '30s,60s,120s'
+
+config = {
+    "database": {
+        "host": "${DB_HOST}",
+        "port": "${DB_PORT}",
+        "debug": "${DB_DEBUG}",
+    },
+    "hosts": "${ALLOWED_HOSTS}",
+    "timeouts": "${TIMEOUTS}",
+}
+
+result = env.normalize_config(config)
+# Returns:
+# {
+#     "database": {
+#         "host": "localhost",
+#         "port": 5432,              # int (not string)
+#         "debug": True,             # bool (not string)
+#     },
+#     "hosts": ["localhost", "127.0.0.1", "192.168.1.1"],  # list
+#     "timeouts": [30.0, 60.0, 120.0],  # list of floats (seconds)
+# }
+```
+
 ## Normalization & Casting
 
 ### Automatic Type Detection
