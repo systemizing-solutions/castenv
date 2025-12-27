@@ -458,5 +458,47 @@ poetry build
 poetry publish
 ```
 
+### Automated PyPI Publishing
+
+This project uses GitHub Actions to automatically publish to PyPI when a new version tag is pushed.
+
+#### Setup (One-time configuration)
+
+1. **Register a Trusted Publisher on PyPI**:
+   - Go to https://pypi.org/manage/account/publishing/
+   - Click "Add a new pending publisher"
+   - Fill in the following details:
+     - **PyPI Project Name**: `castenv`
+     - **Owner**: `systemizing-solutions` (your GitHub username)
+     - **Repository name**: `castenv`
+     - **Workflow name**: `publish.yml`
+     - **Environment name**: `pypi`
+   - Click "Add pending publisher"
+
+#### How it works
+
+When you use `bumpver` to update the version:
+```shell
+bumpver update --patch  # or --minor, --major
+```
+
+This will:
+1. Update the version in `pyproject.toml`, `src/castenv/__init__.py`, and `README.md`
+2. Create a git commit with the version bump
+3. Create a git tag (e.g., `4.0.1`)
+4. Push the tag to GitHub
+
+GitHub Actions will automatically detect the new tag and:
+1. Build the distribution packages (wheel and source)
+2. Publish to PyPI using the trusted publisher authentication
+
+#### Security
+
+This approach uses **OpenID Connect (OIDC) Trusted Publishers**, which is more secure than API tokens because:
+- ✅ No credentials are stored in GitHub secrets
+- ✅ Only this specific workflow can publish
+- ✅ Only from this specific repository
+- ✅ PyPI automatically verifies the request is legitimate
+
 ## License
 [MIT](https://github.com/systemizing-solutions/castenv/blob/main/LICENSE)
