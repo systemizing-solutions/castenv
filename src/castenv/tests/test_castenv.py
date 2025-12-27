@@ -441,15 +441,15 @@ def test_normalize_config_dict_recursive(monkeypatch):
     monkeypatch.setenv("DB_HOST", "localhost")
     monkeypatch.setenv("DB_PORT", "5432")
     monkeypatch.setenv("DB_DEBUG", "false")
-    
+
     config = {
         "host": "${DB_HOST}",
         "port": "${DB_PORT}",
         "debug": "${DB_DEBUG}",
     }
-    
+
     result = env.normalize_config(config)
-    
+
     assert result["host"] == "localhost"
     assert result["port"] == 5432
     assert result["debug"] is False
@@ -459,15 +459,15 @@ def test_normalize_config_list_recursive(monkeypatch):
     """Test recursive processing of lists."""
     monkeypatch.setenv("PORTS", "8000,8001,8002")
     monkeypatch.setenv("ENABLED", "true")
-    
+
     config = [
         "${PORTS}",
         "${ENABLED}",
         "static_value",
     ]
-    
+
     result = env.normalize_config(config)
-    
+
     assert result[0] == [8000, 8001, 8002]  # List parsed and numbers cast
     assert result[1] is True
     assert result[2] == "static_value"
@@ -479,24 +479,24 @@ def test_normalize_config_nested_structures(monkeypatch):
     monkeypatch.setenv("TIMEOUT", "30s")
     monkeypatch.setenv("RETRIES", "3")
     monkeypatch.setenv("TAGS", "prod,stable,v1")
-    
+
     config = {
         "api": {
             "url": "${API_URL}",
             "settings": {
                 "timeout": "${TIMEOUT}",
                 "retries": "${RETRIES}",
-            }
+            },
         },
         "tags": "${TAGS}",
         "servers": [
             {"name": "server1", "port": "8080"},
             {"name": "server2", "port": "8081"},
-        ]
+        ],
     }
-    
+
     result = env.normalize_config(config)
-    
+
     assert result["api"]["url"] == "https://api.example.com"
     assert result["api"]["settings"]["timeout"] == 30.0
     assert result["api"]["settings"]["retries"] == 3
@@ -515,9 +515,9 @@ def test_normalize_config_non_string_passthrough(monkeypatch):
         "meta": {"nested": True},
         "nothing": None,
     }
-    
+
     result = env.normalize_config(config)
-    
+
     assert result["count"] == 42
     assert result["ratio"] == 3.14
     assert result["flag"] is True
@@ -532,9 +532,9 @@ def test_normalize_config_with_expanduser(monkeypatch):
         "log_file": "~/app/logs/app.log",
         "config_dir": "~/config",
     }
-    
+
     result = env.normalize_config(config, expand_user=True)
-    
+
     # Both should be expanded
     assert not result["log_file"].startswith("~")
     assert not result["config_dir"].startswith("~")
@@ -545,26 +545,24 @@ def test_normalize_config_with_expanduser(monkeypatch):
 def test_normalize_config_with_json_expansion(monkeypatch):
     """Test JSON object expansion in env vars."""
     monkeypatch.setenv("CONFIG_JSON", '{"key": "value", "count": 10}')
-    
-    config = {
-        "settings": "${CONFIG_JSON}"
-    }
-    
+
+    config = {"settings": "${CONFIG_JSON}"}
+
     result = env.normalize_config(config)
-    
+
     assert result["settings"] == {"key": "value", "count": 10}
 
 
 def test_normalize_config_disable_parsing(monkeypatch):
     """Test that parsing can be disabled via kwargs."""
     monkeypatch.setenv("CSV_LIST", "a,b,c")
-    
+
     # With parse_lists disabled
     result = env.normalize_config(
         {"items": "${CSV_LIST}"},
-        parse_lists=False
+        parse_lists=False,
     )
-    
+
     assert result["items"] == "a,b,c"  # Not parsed as list
 
 
@@ -573,10 +571,10 @@ def test_normalize_config_empty_string(monkeypatch):
     config = {
         "optional": "",
     }
-    
+
     result = env.normalize_config(config, coerce_empty_to_none=True)
     assert result["optional"] is None
-    
+
     result = env.normalize_config(config, coerce_empty_to_none=False)
     assert result["optional"] == ""
 
@@ -584,7 +582,7 @@ def test_normalize_config_empty_string(monkeypatch):
 def test_normalize_config_missing_env_var(monkeypatch):
     """Test behavior with undefined env vars in expansions."""
     monkeypatch.delenv("UNDEFINED_VAR", raising=False)
-    
+
     # os.path.expandvars leaves undefined vars as-is
     result = env.normalize_config("prefix_${UNDEFINED_VAR}_suffix")
     assert result == "prefix__suffix"

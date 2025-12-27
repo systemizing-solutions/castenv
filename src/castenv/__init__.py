@@ -400,7 +400,10 @@ def normalize_config(
     }
 
     if isinstance(obj, dict):
-        return {key: normalize_config(value, **normalize_kwargs) for key, value in obj.items()}
+        return {
+            key: normalize_config(value, **normalize_kwargs)
+            for key, value in obj.items()
+        }
     elif isinstance(obj, list):
         return [normalize_config(item, **normalize_kwargs) for item in obj]
     elif isinstance(obj, str):
